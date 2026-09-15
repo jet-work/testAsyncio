@@ -1,0 +1,733 @@
+<!doctype html>
+<title>Seat Queue Dispatch</title>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Sans+Thai:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #eeece4;
+    --panel: #ffffff;
+    --panel-2: #f7f5ee;
+    --ink: #262521;
+    --ink-dim: #6b675e;
+    --line: #d9d5c9;
+    --line-soft: #e6e3d8;
+
+    --main: #6c5ce0;
+    --main-soft: #eeeaff;
+    --producer: #1f8a70;
+    --producer-soft: #e3f4ee;
+    --consumer: #c9711f;
+    --consumer-soft: #faeee0;
+
+    --ok: #1f8a4c;
+    --bad: #c23b3b;
+    --amber: #c9711f;
+
+    padding-top: env(safe-area-inset-top, 0px);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+    color-scheme: light dark;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #14161a;
+      --panel: #1c1f24;
+      --panel-2: #191c21;
+      --ink: #e9e7df;
+      --ink-dim: #9a968b;
+      --line: #33363c;
+      --line-soft: #2a2d33;
+
+      --main: #a79bff;
+      --main-soft: #262244;
+      --producer: #5fd3ad;
+      --producer-soft: #14332a;
+      --consumer: #f0a860;
+      --consumer-soft: #3a2916;
+
+      --ok: #5fd38a;
+      --bad: #ff8a8a;
+      --amber: #f0a860;
+    }
+  }
+
+  :root[data-theme="dark"] {
+    --bg: #14161a;
+    --panel: #1c1f24;
+    --panel-2: #191c21;
+    --ink: #e9e7df;
+    --ink-dim: #9a968b;
+    --line: #33363c;
+    --line-soft: #2a2d33;
+
+    --main: #a79bff;
+    --main-soft: #262244;
+    --producer: #5fd3ad;
+    --producer-soft: #14332a;
+    --consumer: #f0a860;
+    --consumer-soft: #3a2916;
+
+    --ok: #5fd38a;
+    --bad: #ff8a8a;
+    --amber: #f0a860;
+  }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: "IBM Plex Sans Thai", "IBM Plex Sans", -apple-system, "Segoe UI", sans-serif;
+    padding: 20px 16px 40px;
+    -webkit-font-smoothing: antialiased;
+  }
+  img { max-width: 100%; }
+  [hidden] { display: none !important; }
+
+  .wrap { max-width: 980px; margin: 0 auto; }
+
+  /* ---------- header ---------- */
+  .masthead {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px;
+    flex-wrap: wrap;
+    border-bottom: 2px solid var(--ink);
+    padding-bottom: 12px;
+    margin-bottom: 6px;
+  }
+  .masthead .label {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 11px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--ink-dim);
+  }
+  h1 {
+    font-size: clamp(22px, 4.2vw, 30px);
+    font-weight: 700;
+    margin: 2px 0 0;
+    letter-spacing: -0.01em;
+    text-wrap: balance;
+  }
+  .subhead {
+    font-size: 14px;
+    color: var(--ink-dim);
+    max-width: 62ch;
+    margin: 10px 0 22px;
+    line-height: 1.55;
+  }
+  .subhead code {
+    font-family: "IBM Plex Mono", monospace;
+    background: var(--panel-2);
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    padding: 0 4px;
+    font-size: 12.5px;
+  }
+
+  /* ---------- transport controls ---------- */
+  .transport {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 10px 12px;
+    margin-bottom: 18px;
+  }
+  .transport button {
+    font-family: "IBM Plex Sans Thai", "IBM Plex Sans", sans-serif;
+    font-size: 13.5px;
+    font-weight: 600;
+    border: 1px solid var(--line);
+    background: var(--panel-2);
+    color: var(--ink);
+    border-radius: 7px;
+    padding: 7px 12px;
+    cursor: pointer;
+    transition: background .12s, transform .06s, border-color .12s;
+  }
+  .transport button:hover { border-color: var(--ink-dim); }
+  .transport button:active { transform: translateY(1px); }
+  .transport button:focus-visible {
+    outline: 2px solid var(--main);
+    outline-offset: 2px;
+  }
+  .transport button.primary {
+    background: var(--ink);
+    color: var(--bg);
+    border-color: var(--ink);
+  }
+  .transport .spacer { flex: 1; }
+  .step-readout {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 12.5px;
+    color: var(--ink-dim);
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+  .scrub {
+    width: 100%;
+    order: 10;
+    accent-color: var(--main);
+    margin-top: 4px;
+  }
+  select.speed {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 12.5px;
+    border: 1px solid var(--line);
+    background: var(--panel-2);
+    color: var(--ink);
+    border-radius: 7px;
+    padding: 6px 8px;
+  }
+
+  /* ---------- narration banner ---------- */
+  .narration {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-left: 4px solid var(--amber);
+    border-radius: 8px;
+    padding: 12px 14px;
+    margin-bottom: 20px;
+    min-height: 46px;
+    display: flex;
+    align-items: center;
+  }
+  .narration p {
+    margin: 0;
+    font-size: 14.5px;
+    line-height: 1.5;
+  }
+  .narration .tag {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 11px;
+    font-weight: 600;
+    padding: 1px 6px;
+    border-radius: 4px;
+    margin-right: 8px;
+    white-space: nowrap;
+  }
+
+  /* ---------- lane panels ---------- */
+  .lanes {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 10px;
+    margin-bottom: 20px;
+  }
+  @media (max-width: 720px) {
+    .lanes { grid-template-columns: 1fr; }
+  }
+  .lane {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    overflow: hidden;
+    transition: box-shadow .18s, border-color .18s;
+  }
+  .lane.is-active {
+    border-color: var(--lane-color);
+    box-shadow: 0 0 0 1px var(--lane-color), 0 6px 18px -10px var(--lane-color);
+  }
+  .lane-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 9px 12px;
+    background: var(--lane-soft);
+    border-bottom: 1px solid var(--line);
+  }
+  .lane-name {
+    font-family: "IBM Plex Mono", monospace;
+    font-weight: 600;
+    font-size: 13px;
+    color: var(--lane-color);
+  }
+  .lane-status {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 10.5px;
+    color: var(--ink-dim);
+    white-space: nowrap;
+  }
+  .lane-status.is-running { color: var(--lane-color); font-weight: 600; }
+  .lane-status.is-done { color: var(--ok); font-weight: 600; }
+  .lane-code {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 11.5px;
+    line-height: 1.85;
+    padding: 10px 0;
+    white-space: pre;
+    overflow-x: auto;
+  }
+  .lane-code .ln {
+    display: block;
+    padding: 1px 12px;
+    color: var(--ink-dim);
+    border-left: 2px solid transparent;
+  }
+  .lane-code .ln.active {
+    color: var(--ink);
+    background: var(--lane-soft);
+    border-left-color: var(--lane-color);
+    font-weight: 600;
+  }
+  .lane-code .ln.faded { opacity: .45; }
+
+  /* ---------- queue rail ---------- */
+  .rail-block {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 14px 14px 16px;
+    margin-bottom: 12px;
+  }
+  .rail-title {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 11px;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    color: var(--ink-dim);
+    margin: 0 0 10px;
+  }
+  .rail {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 52px;
+    padding: 6px 4px;
+    overflow-x: auto;
+  }
+  .rail-empty {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 12px;
+    color: var(--ink-dim);
+    font-style: normal;
+  }
+  .ticket {
+    flex: 0 0 auto;
+    font-family: "IBM Plex Mono", monospace;
+    font-weight: 600;
+    font-size: 15px;
+    min-width: 40px;
+    height: 40px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 7px;
+    border: 1.5px solid var(--producer);
+    background: var(--producer-soft);
+    color: var(--producer);
+    animation: pop .22s ease-out;
+  }
+  .ticket.sentinel {
+    border-color: var(--consumer);
+    background: var(--consumer-soft);
+    color: var(--consumer);
+    font-size: 11px;
+    padding: 0 10px;
+    min-width: auto;
+  }
+  @keyframes pop {
+    from { transform: scale(.75); opacity: 0; }
+    to { transform: scale(1); opacity: 1; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .ticket { animation: none; }
+  }
+
+  /* ---------- seats + roster row ---------- */
+  .status-row {
+    display: grid;
+    grid-template-columns: 1fr 1.4fr;
+    gap: 10px;
+    margin-bottom: 22px;
+  }
+  @media (max-width: 640px) {
+    .status-row { grid-template-columns: 1fr; }
+  }
+  .seats-block, .roster-block {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 14px;
+  }
+  .seat-count {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 26px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    line-height: 1;
+    margin: 4px 0 10px;
+  }
+  .seat-count span { font-size: 14px; color: var(--ink-dim); font-weight: 400; }
+  .seat-icons { display: flex; gap: 5px; flex-wrap: wrap; }
+  .seat-dot {
+    width: 15px; height: 15px;
+    border-radius: 4px;
+    border: 1.5px solid var(--ok);
+    transition: background .2s, border-color .2s;
+  }
+  .seat-dot.taken { background: var(--line); border-color: var(--line); }
+  .seat-dot.free { background: var(--ok); }
+
+  .roster {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+  }
+  .chip {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 12.5px;
+    font-weight: 600;
+    padding: 5px 9px;
+    border-radius: 6px;
+    border: 1.5px solid var(--line);
+    color: var(--ink-dim);
+    background: var(--panel-2);
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    transition: all .2s;
+  }
+  .chip.ok { border-color: var(--ok); color: var(--ok); background: color-mix(in srgb, var(--ok) 12%, var(--panel-2)); }
+  .chip.full { border-color: var(--bad); color: var(--bad); background: color-mix(in srgb, var(--bad) 10%, var(--panel-2)); text-decoration: line-through; }
+
+  /* ---------- footer note ---------- */
+  .footnote {
+    font-size: 12.5px;
+    color: var(--ink-dim);
+    line-height: 1.6;
+    border-top: 1px solid var(--line);
+    padding-top: 14px;
+    margin-top: 4px;
+  }
+  .footnote b { color: var(--ink); }
+</style>
+
+<div class="wrap">
+  <header class="masthead">
+    <div>
+      <div class="label">asyncio.Queue &middot; producer / consumer walkthrough</div>
+      <h1>Seat Queue Dispatch</h1>
+    </div>
+  </header>
+  <p class="subhead">
+    จำลองการทำงานจริงของ <code>main()</code>, <code>producer()</code> และ <code>consumer()</code> ทีละบรรทัด
+    เพื่อให้เห็นว่า event loop สลับงานกันยังไง และทำไม <code>await</code> ไม่ได้แปลว่า &ldquo;หยุดทุกอย่าง&rdquo;
+  </p>
+
+  <div class="transport">
+    <button id="btnReset" type="button">⟲ Reset</button>
+    <button id="btnPrev" type="button">◀ ก่อนหน้า</button>
+    <button id="btnPlay" type="button" class="primary">▶ เล่น</button>
+    <button id="btnNext" type="button">ถัดไป ▶</button>
+    <select id="speed" class="speed">
+      <option value="1400">ช้า</option>
+      <option value="850" selected>ปกติ</option>
+      <option value="450">เร็ว</option>
+    </select>
+    <span class="spacer"></span>
+    <span class="step-readout" id="stepReadout">Step 1 / 1</span>
+    <input type="range" id="scrub" class="scrub" min="0" max="1" step="1" value="0">
+  </div>
+
+  <div class="narration">
+    <p><span class="tag" id="narrTag" style="background:var(--main-soft); color:var(--main);">main</span><span id="narrText">กำลังโหลด…</span></p>
+  </div>
+
+  <section class="lanes">
+    <div class="lane" id="lane-main" style="--lane-color:var(--main); --lane-soft:var(--main-soft);">
+      <div class="lane-head">
+        <span class="lane-name">main()</span>
+        <span class="lane-status" id="status-main">—</span>
+      </div>
+      <pre class="lane-code" id="code-main"></pre>
+    </div>
+    <div class="lane" id="lane-producer" style="--lane-color:var(--producer); --lane-soft:var(--producer-soft);">
+      <div class="lane-head">
+        <span class="lane-name">producer()</span>
+        <span class="lane-status" id="status-producer">—</span>
+      </div>
+      <pre class="lane-code" id="code-producer"></pre>
+    </div>
+    <div class="lane" id="lane-consumer" style="--lane-color:var(--consumer); --lane-soft:var(--consumer-soft);">
+      <div class="lane-head">
+        <span class="lane-name">consumer()</span>
+        <span class="lane-status" id="status-consumer">—</span>
+      </div>
+      <pre class="lane-code" id="code-consumer"></pre>
+    </div>
+  </section>
+
+  <div class="rail-block">
+    <p class="rail-title">asyncio.Queue — เนื้อหาปัจจุบัน (FIFO, ซ้าย = หัวคิว)</p>
+    <div class="rail" id="rail"></div>
+  </div>
+
+  <div class="status-row">
+    <div class="seats-block">
+      <p class="rail-title">ที่นั่งคงเหลือ</p>
+      <div class="seat-count"><span id="seatsNum">5</span><span> / 5</span></div>
+      <div class="seat-icons" id="seatIcons"></div>
+    </div>
+    <div class="roster-block">
+      <p class="rail-title">ผลของนักเรียนแต่ละคน (A–G)</p>
+      <div class="roster" id="roster"></div>
+    </div>
+  </div>
+
+  <p class="footnote">
+    <b>อ่านยังไง:</b> แผงสี่เหลี่ยมที่มีกรอบเรืองแสงคือ coroutine ที่ &ldquo;กำลังรัน&rdquo; ณ จังหวะนั้น ส่วนอีกสองแผงหยุดรออยู่ (await) —
+    สังเกตว่า <b>producer</b> กับ <b>consumer</b> สลับกันทำงานทีละนิดตลอดเวลา ไม่ใช่ทำจนจบทีละตัว
+    และ <code>main()</code> จะไม่ขยับไปบรรทัดถัดไปจนกว่า task ที่ await อยู่จะเสร็จจริง
+  </p>
+</div>
+
+<script>
+(() => {
+  "use strict";
+
+  const MAIN_CODE = [
+    "queue = asyncio.Queue()",
+    "students = [\"A\",\"B\",\"C\",\"D\",\"E\",\"F\",\"G\"]",
+    "seats_left = 5",
+    "producer_task = asyncio.create_task(producer(queue, students))",
+    "consumer_task = asyncio.create_task(consumer(queue, seats_left))",
+    "await producer_task",
+    "await queue.join()",
+    "await queue.put(None)",
+    "await consumer_task",
+  ];
+  const PRODUCER_CODE = [
+    "for student in requests:",
+    "    await queue.put(student)",
+    "    print(f'...{student}...')",
+    "    await asyncio.sleep(0.05)",
+    "# for-loop จบครบทุกคน → เสร็จสมบูรณ์",
+  ];
+  const CONSUMER_CODE = [
+    "while True:",
+    "    item = await queue.get()",
+    "    if item is None:",
+    "        queue.task_done(); break",
+    "    elif seats_left > 0:",
+    "        seats_left -= 1",
+    "        print(...); queue.task_done()",
+    "    else:",
+    "        print(...); queue.task_done()",
+  ];
+
+  // ---- build the frame timeline by simulating the real control flow ----
+  const students = ["A", "B", "C", "D", "E", "F", "G"];
+  let seatsLeft = 5;
+  let queue = [];
+  let results = [];
+  let created = { producer: false, consumer: false };
+  let completed = { producer: false, consumer: false, main: false };
+  const frames = [];
+
+  function snap(lane, line, note) {
+    frames.push({
+      lane, line, note,
+      queue: queue.slice(),
+      seatsLeft,
+      results: results.map(r => ({ ...r })),
+      created: { ...created },
+      completed: { ...completed },
+    });
+  }
+
+  snap("main", 2, "main(): ตั้งค่าเริ่มต้น — seats_left = 5, students มี 7 คน");
+  created.producer = true;
+  snap("main", 3, "main(): สร้าง producer_task ด้วย create_task() — เริ่มรันเป็น background ทันที ไม่ต้องรอ");
+  created.consumer = true;
+  snap("main", 4, "main(): สร้าง consumer_task ด้วย create_task() — เริ่มรันเป็น background ทันทีเช่นกัน");
+  snap("main", 5, "main(): await producer_task — main() หยุดรอตรงนี้ ปล่อยให้ producer/consumer สลับกันทำงาน");
+
+  for (const s of students) {
+    queue.push(s);
+    snap("producer", 1, `producer: await queue.put('${s}') — ส่ง '${s}' เข้า queue`);
+
+    const item = queue.shift();
+    snap("consumer", 1, `consumer: item = await queue.get() → ได้ '${item}'`);
+
+    if (seatsLeft > 0) {
+      snap("consumer", 4, `consumer: seats_left (${seatsLeft}) > 0 → เงื่อนไขเป็นจริง`);
+      seatsLeft -= 1;
+      results.push({ name: item, status: "ok" });
+      snap("consumer", 6, `consumer: seats_left -= 1 → ${seatsLeft}, print("${item} ได้ที่นั่งแล้ว"), task_done()`);
+    } else {
+      results.push({ name: item, status: "full" });
+      snap("consumer", 8, `consumer: seats_left = 0 → else, print("${item} ที่เต็มแล้ว"), task_done()`);
+    }
+    snap("consumer", 0, "consumer: วนกลับ while True → await queue.get() รอคนถัดไป");
+    snap("producer", 3, "producer: await asyncio.sleep(0.05) — พักก่อนส่งคนถัดไป");
+  }
+
+  completed.producer = true;
+  snap("producer", 4, "producer: for-loop จบครบ 7 คน → producer_task เสร็จสมบูรณ์ ✅");
+
+  snap("main", 5, "main(): producer_task เสร็จแล้ว → เดินหน้าต่อไปบรรทัดถัดไป");
+  snap("main", 6, "main(): await queue.join() — unfinished tasks = 0 อยู่แล้ว (task_done ครบทุกใบ) → ผ่านทันที");
+
+  queue.push(null);
+  snap("main", 7, "main(): await queue.put(None) — ส่ง sentinel เข้า queue เพื่อบอกให้ consumer หยุด");
+
+  queue.shift();
+  snap("consumer", 1, "consumer: item = await queue.get() → ได้ None");
+  snap("consumer", 2, "consumer: if item is None → เป็นจริง");
+  completed.consumer = true;
+  snap("consumer", 3, "consumer: queue.task_done(); break → consumer_task เสร็จสมบูรณ์ ✅");
+
+  completed.main = true;
+  snap("main", 8, "main(): await consumer_task เสร็จแล้ว → โปรแกรมจบสมบูรณ์ทั้งหมด 🎉");
+
+  // ---- render ----
+  const els = {
+    narrTag: document.getElementById("narrTag"),
+    narrText: document.getElementById("narrText"),
+    stepReadout: document.getElementById("stepReadout"),
+    scrub: document.getElementById("scrub"),
+    rail: document.getElementById("rail"),
+    seatsNum: document.getElementById("seatsNum"),
+    seatIcons: document.getElementById("seatIcons"),
+    roster: document.getElementById("roster"),
+  };
+  const laneEls = {
+    main: { panel: document.getElementById("lane-main"), code: document.getElementById("code-main"), status: document.getElementById("status-main") },
+    producer: { panel: document.getElementById("lane-producer"), code: document.getElementById("code-producer"), status: document.getElementById("status-producer") },
+    consumer: { panel: document.getElementById("lane-consumer"), code: document.getElementById("code-consumer"), status: document.getElementById("status-consumer") },
+  };
+  const CODE = { main: MAIN_CODE, producer: PRODUCER_CODE, consumer: CONSUMER_CODE };
+  const LANE_LABEL = {
+    main: { text: "main", bg: "var(--main-soft)", fg: "var(--main)" },
+    producer: { text: "producer", bg: "var(--producer-soft)", fg: "var(--producer)" },
+    consumer: { text: "consumer", bg: "var(--consumer-soft)", fg: "var(--consumer)" },
+  };
+
+  els.scrub.max = String(frames.length - 1);
+
+  function laneStatusLabel(lane, frame) {
+    if (frame.completed[lane]) return { text: "✓ เสร็จสมบูรณ์", cls: "is-done" };
+    if (lane !== "main" && !frame.created[lane]) return { text: "ยังไม่ถูกสร้าง", cls: "" };
+    if (frame.lane === lane) return { text: "▶ กำลังทำงาน", cls: "is-running" };
+    return { text: "⏸ พักรอ (await)", cls: "" };
+  }
+
+  function renderLane(lane, frame) {
+    const { panel, code, status } = laneEls[lane];
+    const isActive = frame.lane === lane;
+    panel.classList.toggle("is-active", isActive);
+
+    const lines = CODE[lane];
+    code.innerHTML = lines.map((text, i) => {
+      const isLineActive = isActive && i === frame.line;
+      const isPastDone = frame.completed[lane] && lane !== "main";
+      const cls = ["ln", isLineActive ? "active" : "", (!isActive && !isPastDone) ? "faded" : ""].filter(Boolean).join(" ");
+      return `<span class="${cls}">${escapeHtml(text)}</span>`;
+    }).join("\n");
+
+    const st = laneStatusLabel(lane, frame);
+    status.textContent = st.text;
+    status.className = "lane-status" + (st.cls ? " " + st.cls : "");
+  }
+
+  function escapeHtml(s) {
+    return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  }
+
+  function render(idx) {
+    const frame = frames[idx];
+
+    const label = LANE_LABEL[frame.lane];
+    els.narrTag.textContent = label.text;
+    els.narrTag.style.background = label.bg;
+    els.narrTag.style.color = label.fg;
+    els.narrText.textContent = frame.note;
+
+    els.stepReadout.textContent = `Step ${idx + 1} / ${frames.length}`;
+    els.scrub.value = String(idx);
+
+    renderLane("main", frame);
+    renderLane("producer", frame);
+    renderLane("consumer", frame);
+
+    if (frame.queue.length === 0) {
+      els.rail.innerHTML = '<span class="rail-empty">(queue ว่างเปล่า)</span>';
+    } else {
+      els.rail.innerHTML = frame.queue.map(item => {
+        if (item === null) return '<span class="ticket sentinel">None (sentinel)</span>';
+        return `<span class="ticket">${escapeHtml(item)}</span>`;
+      }).join("");
+    }
+
+    els.seatsNum.textContent = String(frame.seatsLeft);
+    const dots = [];
+    for (let i = 0; i < 5; i++) {
+      dots.push(`<span class="seat-dot ${i < frame.seatsLeft ? "free" : "taken"}"></span>`);
+    }
+    els.seatIcons.innerHTML = dots.join("");
+
+    const resultMap = new Map(frame.results.map(r => [r.name, r.status]));
+    els.roster.innerHTML = students.map(s => {
+      const st = resultMap.get(s);
+      if (st === "ok") return `<span class="chip ok">${s} ✓ ได้ที่นั่ง</span>`;
+      if (st === "full") return `<span class="chip full">${s} ✗ เต็ม</span>`;
+      return `<span class="chip">${s} ···</span>`;
+    }).join("");
+  }
+
+  // ---- transport ----
+  let current = 0;
+  let playing = false;
+  let timer = null;
+  const btnPlay = document.getElementById("btnPlay");
+  const speedSel = document.getElementById("speed");
+
+  function goto(idx) {
+    current = Math.max(0, Math.min(frames.length - 1, idx));
+    render(current);
+    if (current === frames.length - 1) stopPlay();
+  }
+
+  function stopPlay() {
+    playing = false;
+    btnPlay.textContent = "▶ เล่น";
+    if (timer) { clearInterval(timer); timer = null; }
+  }
+
+  function startPlay() {
+    if (current >= frames.length - 1) current = 0;
+    playing = true;
+    btnPlay.textContent = "❚❚ หยุด";
+    timer = setInterval(() => {
+      if (current >= frames.length - 1) { stopPlay(); return; }
+      goto(current + 1);
+    }, Number(speedSel.value));
+  }
+
+  document.getElementById("btnNext").addEventListener("click", () => { stopPlay(); goto(current + 1); });
+  document.getElementById("btnPrev").addEventListener("click", () => { stopPlay(); goto(current - 1); });
+  document.getElementById("btnReset").addEventListener("click", () => { stopPlay(); goto(0); });
+  btnPlay.addEventListener("click", () => { playing ? stopPlay() : startPlay(); });
+  els.scrub.addEventListener("input", (e) => { stopPlay(); goto(Number(e.target.value)); });
+  speedSel.addEventListener("change", () => { if (playing) { stopPlay(); startPlay(); } });
+
+  window.addEventListener("keydown", (e) => {
+    if (e.key === "ArrowRight") { stopPlay(); goto(current + 1); }
+    if (e.key === "ArrowLeft") { stopPlay(); goto(current - 1); }
+    if (e.key === " ") { e.preventDefault(); playing ? stopPlay() : startPlay(); }
+  });
+
+  render(0);
+})();
+</script>
