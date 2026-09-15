@@ -1,39 +1,80 @@
 import asyncio
 
-async def  producer(queue, requests):
-    for student in requests:
-        await queue.put(student)
+# ============================================================
+# producer(): ผู้ผลิตคำขอจอง
+#   หน้าที่ = หยิบชื่อนักเรียนทีละคนจาก "requests" (ลิสต์ที่รับมา)
+#            แล้วใส่ลงใน "queue" (กล่องกลางที่ producer/consumer/main ถือร่วมกัน)
+#   หมายเหตุ: queue กับ consumer เป็น "object เดียวกัน" ที่ main() สร้างไว้
+#            แล้วส่งเข้ามาเป็น argument ไม่ได้เป็นคนละก้อนกัน
+# ============================================================
+async def producer(queue, requests):
+    for student in requests:                                 # วนลูปบน requests (ลิสต์จริงที่ main ส่งมา)
+        await queue.put(student)                              # ใส่ "student" (ทีละคน) ลง queue
+                                                                # ต้อง await เพราะ put() เป็น coroutine
+                                                                # (ถ้า queue มี maxsize และเต็ม จะรอจนกว่าจะมีที่ว่าง)
         print(f"นักเรียนคนที่ {student} เข้าที่แล้ว")
-        await asyncio.sleep(0.05)
-        
+        await asyncio.sleep(0.05)                              # หน่วงเวลาก่อนส่งคนถัดไป
+                                                                # จำลองว่าคำขอแต่ละใบทยอยเข้ามา ไม่ได้มาพร้อมกันหมด
+
+
+# ============================================================
+# consumer(): ผู้ตัดสินใจจัดที่นั่ง
+#   หน้าที่ = ดึงชื่อออกจาก queue ทีละคน แล้วตัดสินว่าที่นั่งยังเหลือไหม
+#   หยุดทำงานเมื่อเจอ "None" (sentinel value = สัญญาณพิเศษที่ main() ส่งมาบอกว่า "หมดคนแล้ว")
+# ============================================================
 async def consumer(queue, seats_left):
-    while True:
-        item = await queue.get()
-        if item is None:
-            queue.task_done()
-            break 
-        elif seats_left > 0 :
+    while True:                                                # วนรับงานไปเรื่อยๆ ไม่รู้ล่วงหน้าว่าจะมีกี่คน
+                                                                # จึงต้องใช้ sentinel บอกให้เลิกวน แทนการนับจำนวนตายตัว
+        item = await queue.get()                               # ดึงของออกจาก queue (FIFO: ใครเข้าก่อนออกก่อน)
+                                                                # ถ้า queue ว่าง จะ await รอจนกว่าจะมีของเข้ามา
+
+        if item is None:                                       # เจอสัญญาณจบ (sentinel) ที่ main() ส่งมา
+            queue.task_done()                                  # ต้องเรียก task_done() ทุกครั้งที่ get() สำเร็จ
+                                                                # (รวมถึงตอนเจอ sentinel ด้วย) ไม่งั้น queue.join()
+                                                                # ใน main() จะรอค้างตลอดไป
+            break                                               # ออกจาก while True → จบการทำงานของ consumer
+
+        elif seats_left > 0:                                   # ยังมีที่นั่งเหลือ
             print("ได้ที่นั่งแล้ว")
-            seats_left -= 1
-            queue.task_done()
-        else:
+            seats_left -= 1                                    # ลดที่นั่งลง 1 (ทีละคน ไม่ใช่ seats_left -= seats_left)
+            queue.task_done()                                  # แจ้งว่า item ตัวนี้ประมวลผลเสร็จแล้ว
+
+        else:                                                   # ที่นั่งหมดแล้ว (seats_left <= 0)
             print("ที่เต็มแล้ว")
-            queue.task_done()
-        
+            queue.task_done()                                  # ต้อง task_done() เหมือนกัน แม้จะถูกปฏิเสธก็ตาม
+                                                                # เพราะ "ประมวลผลเสร็จ" ไม่ได้แปลว่า "ต้องได้ที่นั่ง"
+                                                                # แค่แปลว่า "จัดการคำขอนี้จบแล้ว"
+
+
+# ============================================================
+# main(): ตัวคุมจังหวะทั้งหมด (orchestrator)
+# ============================================================
 async def main():
-    queue = asyncio.Queue()
-    students = ["A", "B", "C", "D", "E", "F", "G"]
-    seats_left = 5
+    queue = asyncio.Queue()                                    # สร้าง queue กลาง (ไม่กำหนด maxsize = ไม่จำกัดจำนวน)
+    students = ["A", "B", "C", "D", "E", "F", "G"]              # รายชื่อนักเรียนที่จะยื่นจอง (7 คน)
+    seats_left = 5                                              # ที่นั่งมีแค่ 5 ที่ (คาดว่า 2 คนสุดท้ายจะถูกปฏิเสธ)
 
-    producer_task = asyncio.create_task( producer(queue,students))   # เติม: เรียก producer พร้อม argument
-    consumer_task = asyncio.create_task(consumer(queue, seats_left))   # เติม: เรียก consumer พร้อม argument
+    # create_task() = สั่งให้ coroutine เริ่มรันเป็น background ทันที
+    # โดยที่ main() ไม่ต้องหยุดรอ ณ บรรทัดนี้ (ต่างจากการเขียน await producer(...) ตรงๆ
+    # ซึ่งจะบล็อกรอให้ producer ทำงานจบทั้งหมดก่อน ถึงจะไปสร้าง/เริ่ม consumer ได้)
+    producer_task = asyncio.create_task(producer(queue, students))
+    consumer_task = asyncio.create_task(consumer(queue, seats_left))
+    # ตั้งแต่บรรทัดนี้ไป producer_task และ consumer_task ทำงาน "คู่ขนานกัน" แล้ว
+    # โดยสลับกันทำงานทุกครั้งที่มีจุด await (event loop เป็นคนสลับให้อัตโนมัติ)
 
-    await producer_task          # 1. รอให้ producer ใส่ของครบก่อน
-    await queue.join()             # 2. เติม: รอให้ consumer ประมวลผลของที่มีอยู่จนหมด
-    await queue.put(None) # 3. เติม: ส่งอะไรเพื่อบอกให้ consumer หยุด
-    await consumer_task            # 4. เติม: รอให้ consumer task จบจริง
+    await producer_task          # 1. รอจน producer ใส่ของครบ 7 คนแล้วจริงๆ (for-loop จบ) ก่อนค่อยไปต่อ
+                                  #    ระหว่างที่รอตรงนี้ consumer ก็ทยอยประมวลผลคนที่ถูกใส่เข้าไปแล้วไปพร้อมๆ กัน
 
-       
-if __name__=="__main__":
-    asyncio.run(main())
-        
+    await queue.join()           # 2. รอจนกว่า "งานทุกชิ้นที่เคย put() เข้าไป" จะถูก task_done() ครบ
+                                  #    การันตีว่า A-G ถูกตัดสินใจ (ได้ที่นั่ง/เต็ม) ครบทุกคนแล้วจริงๆ
+                                  #    ไม่ใช่แค่ "ถูกใส่ queue" แต่ "ถูกประมวลผลเสร็จ" ด้วย
+
+    await queue.put(None)        # 3. ตอนนี้มั่นใจแล้วว่าของจริงหมดแล้ว ค่อยส่ง sentinel (None) เข้าคิว
+                                  #    เพื่อบอกให้ consumer หยุดวนลูป (ถ้าส่งเร็วกว่านี้ อาจแซงคิวก่อนคนจริงบางคน)
+
+    await consumer_task          # 4. รอให้ consumer ดึง None ออกมาเจอ แล้ว break ออกจาก while True จริงๆ
+                                  #    ถ้าไม่รอตรงนี้ โปรแกรมอาจจบไปก่อนที่ consumer จะทำงานเสร็จสมบูรณ์
+
+
+if __name__ == "__main__":
+    asyncio.run(main())          # จุดเริ่มต้นของโปรแกรม: สร้าง event loop แล้วรัน main() จนจบ
